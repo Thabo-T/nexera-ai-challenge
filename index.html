@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NexEra Test 1 – Day 3 (AI Summary)</title>
+
+  <style>
+    body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+
+    #panel {
+      position: absolute;
+      top: 10px; left: 10px;
+      background: rgba(0,0,0,0.65);
+      color: white;
+      padding: 12px;
+      border-radius: 10px;
+      z-index: 10;
+      width: 420px;
+    }
+
+    #panel h3 { margin: 0 0 8px 0; font-size: 16px; }
+
+    #row { display: flex; gap: 8px; margin-top: 8px; }
+
+    input {
+      flex: 1; padding: 10px; border-radius: 8px; border: none;
+      outline: none; font-size: 14px;
+    }
+
+    button {
+      padding: 10px 12px; border-radius: 8px; border: none;
+      cursor: pointer; font-size: 14px;
+    }
+
+    #status {
+      margin-top: 10px;
+      background: rgba(255,255,255,0.95);
+      color: #111;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 14px;
+      border: 1px solid rgba(0,0,0,0.1);
+    }
+
+    #summary {
+      margin-top: 10px;
+      background: rgba(255,255,255,0.95);
+      color: #111;
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 14px;
+      border: 1px solid rgba(0,0,0,0.1);
+      line-height: 1.35;
+    }
+
+    code { background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 6px; }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+
+<body>
+  <div id="panel">
+    <h3>Day 3: AI picks model + teaches</h3>
+
+    <div id="row">
+      <input id="prompt" placeholder="Type any description e.g. 'yellow safety helmet'" />
+      <button id="goBtn">Go</button>
+    </div>
+
+    <div id="status">Ready ✅</div>
+    <div id="summary">Summary will appear here…</div>
+  </div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+    const statusEl = document.getElementById("status");
+    const summaryEl = document.getElementById("summary");
+    const promptEl = document.getElementById("prompt");
+    const goBtn = document.getElementById("goBtn");
+
+    function setStatus(msg, type="info") {
+      statusEl.innerHTML = msg;
+      statusEl.style.background =
+        type === "ok" ? "rgba(220,255,220,0.95)" :
+        type === "err" ? "rgba(255,220,220,0.95)" :
+        "rgba(255,255,255,0.95)";
+    }
+
+    // Your model catalog (add more later)
+    const CATALOG = [
+      { id: "hard_hat", label: "Hard hat", file: "models/hard_hat.glb", tags: ["helmet","ppe","construction","safety"] },
+      { id: "fire_extinguisher", label: "Fire extinguisher", file: "models/fire_extinguisher.glb", tags: ["fire","safety","equipment"] },
+      { id: "hammer", label: "Hammer", file: "models/hammer.glb", tags: ["tool","construction","nails"] }
+    ];
+
+    // --- Three.js viewer setup ---
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf0f0f0);
+
+    const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 1.2, 3);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+    dirLight.position.set(5, 10, 7);
+    scene.add(dirLight);
+
+    const loader = new GLTFLoader();
+    let currentModel = null;
+
+    function centerAndScale(model) {
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+
+      model.position.sub(center);
+
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const targetSize = 1.5;
+      const scale = targetSize / maxDim;
+      model.scale.setScalar(scale);
+    }
+
+    function loadModel(path) {
+      return new Promise((resolve, reject) => {
+        loader.load(
+          `./${path}`,
+          (gltf) => {
+            if (currentModel) scene.remove(currentModel);
+            currentModel = gltf.scene;
+            centerAndScale(currentModel);
+            scene.add(currentModel);
+            controls.target.set(0, 0, 0);
+            controls.update();
+            resolve();
+          },
+          undefined,
+          reject
+        );
+      });
+    }
+
+    async function callAI(userText) {
+      const res = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userText, catalog: CATALOG })
+      });
+      if (!res.ok) throw new Error("AI request failed");
+      return await res.json(); // { chosenId, summary }
+    }
+
+    async function run() {
+      const userText = promptEl.value.trim();
+      if (!userText) {
+        setStatus("❌ Type something first", "err");
+        return;
+      }
+
+      setStatus("Thinking… (AI choosing model + writing summary)", "info");
+      summaryEl.textContent = "Working…";
+
+      try {
+        const { chosenId, summary } = await callAI(userText);
+
+        const chosen = CATALOG.find(x => x.id === chosenId) || CATALOG[0];
+
+        setStatus(`Loading: <code>${chosen.label}</code>`, "info");
+        await loadModel(chosen.file);
+
+        setStatus(`✅ Loaded: <code>${chosen.label}</code>`, "ok");
+        summaryEl.textContent = summary;
+      } catch (e) {
+        setStatus("❌ Something went wrong (AI/backend).", "err");
+        summaryEl.textContent = "Check backend setup (Day 3 step).";
+      }
+    }
+
+    goBtn.addEventListener("click", run);
+    promptEl.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+
+    // Load default on start
+    loadModel("models/hard_hat.glb");
+    summaryEl.textContent = "Type a description above and click Go.";
+
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
