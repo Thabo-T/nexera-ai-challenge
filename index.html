@@ -2,32 +2,39 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>NexEra Test 1 – Day 3 (AI + Summary)</title>
+  <title>NexEra Test 1 – Day 4 (Text + Image → 3D + Summary)</title>
 
   <style>
     body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
     #panel {
       position: absolute; top: 10px; left: 10px;
       background: rgba(0,0,0,0.65); color: #fff;
-      padding: 12px; border-radius: 10px; z-index: 10; width: 460px;
+      padding: 12px; border-radius: 10px; z-index: 10; width: 520px;
     }
     #panel h3 { margin: 0 0 8px 0; font-size: 16px; }
-    #row { display: flex; gap: 8px; margin-top: 8px; }
-    input {
+    #row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+    input[type="text"] {
       flex: 1; padding: 10px; border-radius: 8px; border: none;
       outline: none; font-size: 14px;
+    }
+    input[type="file"] {
+      flex: 1; padding: 8px; border-radius: 8px; border: none;
+      background: rgba(255,255,255,0.95); color: #111;
+      font-size: 13px;
     }
     button {
       padding: 10px 12px; border-radius: 8px; border: none;
       cursor: pointer; font-size: 14px;
+      white-space: nowrap;
     }
     #status, #summary {
       margin-top: 10px; background: rgba(255,255,255,0.95); color: #111;
       padding: 10px; border-radius: 10px; font-size: 14px;
       border: 1px solid rgba(0,0,0,0.1); line-height: 1.35;
-      min-height: 20px;
+      min-height: 18px;
     }
     code { background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 6px; }
+    .hint { font-size: 12px; opacity: 0.9; margin-top: 8px; }
   </style>
 
   <script type="importmap">
@@ -42,12 +49,21 @@
 
 <body>
   <div id="panel">
-    <h3>Day 3: AI picks model + teaches</h3>
+    <h3>Day 4: Text OR Image → 3D model + educational summary</h3>
 
+    <!-- TEXT -->
     <div id="row">
-      <input id="prompt" placeholder="Type: 'yellow safety helmet' or 'how to use fire extinguisher'…" />
+      <input id="prompt" type="text" placeholder="Type: 'yellow safety helmet' or 'tool for nails'…" />
       <button id="goBtn">Go</button>
     </div>
+
+    <!-- IMAGE -->
+    <div id="row">
+      <input id="imgInput" type="file" accept="image/*" />
+      <button id="imgBtn">Use Image</button>
+    </div>
+
+    <div class="hint">Tip: Use Live demo on Vercel. Your model files must be inside <code>models/</code>.</div>
 
     <div id="status">Ready ✅</div>
     <div id="summary">Summary will appear here…</div>
@@ -63,6 +79,9 @@
     const promptEl = document.getElementById("prompt");
     const goBtn = document.getElementById("goBtn");
 
+    const imgInput = document.getElementById("imgInput");
+    const imgBtn = document.getElementById("imgBtn");
+
     function setStatus(msg, type="info") {
       statusEl.innerHTML = msg;
       statusEl.style.background =
@@ -71,7 +90,7 @@
         "rgba(255,255,255,0.95)";
     }
 
-    // ✅ Catalog of your local GLB files
+    // ✅ Update these to match the real files in /models
     const CATALOG = [
       { id: "hard_hat", label: "Hard hat", file: "models/hard_hat.glb", tags: ["helmet","ppe","construction","safety"] },
       { id: "fire_extinguisher", label: "Fire extinguisher", file: "models/fire_extinguisher.glb", tags: ["fire","safety","emergency","equipment"] },
@@ -104,6 +123,7 @@
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
+
       model.position.sub(center);
 
       const maxDim = Math.max(size.x, size.y, size.z);
@@ -130,23 +150,39 @@
       });
     }
 
-    async function callAI(userText) {
+    // ---- AI CALLS ----
+    async function callAIText(userText) {
       const res = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userText, catalog: CATALOG })
       });
 
-      // if backend error, show message
       if (!res.ok) {
         const t = await res.text();
-        throw new Error("AI request failed: " + t);
+        throw new Error("Text AI failed: " + t);
       }
 
       return await res.json(); // { chosenId, summary }
     }
 
-    async function run() {
+    async function callAIImage(base64Image) {
+      const res = await fetch("/api/ai-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base64Image, catalog: CATALOG })
+      });
+
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error("Image AI failed: " + t);
+      }
+
+      return await res.json(); // { chosenId, summary }
+    }
+
+    // ---- TEXT FLOW ----
+    async function runText() {
       const userText = promptEl.value.trim();
       if (!userText) {
         setStatus("❌ Type something first", "err");
@@ -157,30 +193,61 @@
       summaryEl.textContent = "Working…";
 
       try {
-        const result = await callAI(userText);
-
-        const chosenId = result?.chosenId;
-        const summary = result?.summary;
-
-        const chosen = CATALOG.find(x => x.id === chosenId) || CATALOG[0];
+        const result = await callAIText(userText);
+        const chosen = CATALOG.find(x => x.id === result.chosenId) || CATALOG[0];
 
         setStatus(`Loading: <code>${chosen.label}</code>`, "info");
         await loadModel(chosen.file);
 
         setStatus(`✅ Loaded: <code>${chosen.label}</code>`, "ok");
-        summaryEl.textContent = (summary && summary.trim()) ? summary : "No summary returned.";
+        summaryEl.textContent = (result.summary && result.summary.trim()) ? result.summary : "No summary returned.";
       } catch (e) {
-        setStatus("❌ AI/backend error (check deploy + env var)", "err");
+        setStatus("❌ Text AI/backend error", "err");
         summaryEl.textContent = String(e.message || e);
       }
     }
 
-    goBtn.addEventListener("click", run);
-    promptEl.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
+    goBtn.addEventListener("click", runText);
+    promptEl.addEventListener("keydown", (e) => { if (e.key === "Enter") runText(); });
 
-    // default model on load
+    // ---- IMAGE FLOW ----
+    imgBtn.addEventListener("click", async () => {
+      if (!imgInput.files || imgInput.files.length === 0) {
+        setStatus("❌ Please choose an image first", "err");
+        return;
+      }
+
+      const file = imgInput.files[0];
+      setStatus("Reading image…", "info");
+      summaryEl.textContent = "Working…";
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64Image = reader.result; // data:image/...;base64,...
+
+          setStatus("Thinking… (AI reading image)", "info");
+          const result = await callAIImage(base64Image);
+
+          const chosen = CATALOG.find(x => x.id === result.chosenId) || CATALOG[0];
+
+          setStatus(`Loading: <code>${chosen.label}</code>`, "info");
+          await loadModel(chosen.file);
+
+          setStatus(`✅ Loaded: <code>${chosen.label}</code>`, "ok");
+          summaryEl.textContent = (result.summary && result.summary.trim()) ? result.summary : "No summary returned.";
+        } catch (e) {
+          setStatus("❌ Image AI/backend error", "err");
+          summaryEl.textContent = String(e.message || e);
+        }
+      };
+
+      reader.readAsDataURL(file);
+    });
+
+    // Default model on load
     await loadModel("models/hard_hat.glb");
-    summaryEl.textContent = "Type a description above and click Go.";
+    summaryEl.textContent = "Type a description OR upload an image, then click a button.";
 
     function animate() {
       requestAnimationFrame(animate);
