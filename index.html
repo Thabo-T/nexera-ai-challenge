@@ -2,57 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>NexEra Test 1 – Day 3 (AI Summary)</title>
+  <title>NexEra Test 1 – Day 3 (AI + Summary)</title>
 
   <style>
     body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
-
     #panel {
-      position: absolute;
-      top: 10px; left: 10px;
-      background: rgba(0,0,0,0.65);
-      color: white;
-      padding: 12px;
-      border-radius: 10px;
-      z-index: 10;
-      width: 420px;
+      position: absolute; top: 10px; left: 10px;
+      background: rgba(0,0,0,0.65); color: #fff;
+      padding: 12px; border-radius: 10px; z-index: 10; width: 460px;
     }
-
     #panel h3 { margin: 0 0 8px 0; font-size: 16px; }
-
     #row { display: flex; gap: 8px; margin-top: 8px; }
-
     input {
       flex: 1; padding: 10px; border-radius: 8px; border: none;
       outline: none; font-size: 14px;
     }
-
     button {
       padding: 10px 12px; border-radius: 8px; border: none;
       cursor: pointer; font-size: 14px;
     }
-
-    #status {
-      margin-top: 10px;
-      background: rgba(255,255,255,0.95);
-      color: #111;
-      padding: 10px;
-      border-radius: 10px;
-      font-size: 14px;
-      border: 1px solid rgba(0,0,0,0.1);
+    #status, #summary {
+      margin-top: 10px; background: rgba(255,255,255,0.95); color: #111;
+      padding: 10px; border-radius: 10px; font-size: 14px;
+      border: 1px solid rgba(0,0,0,0.1); line-height: 1.35;
+      min-height: 20px;
     }
-
-    #summary {
-      margin-top: 10px;
-      background: rgba(255,255,255,0.95);
-      color: #111;
-      padding: 10px;
-      border-radius: 10px;
-      font-size: 14px;
-      border: 1px solid rgba(0,0,0,0.1);
-      line-height: 1.35;
-    }
-
     code { background: rgba(0,0,0,0.06); padding: 2px 6px; border-radius: 6px; }
   </style>
 
@@ -71,7 +45,7 @@
     <h3>Day 3: AI picks model + teaches</h3>
 
     <div id="row">
-      <input id="prompt" placeholder="Type any description e.g. 'yellow safety helmet'" />
+      <input id="prompt" placeholder="Type: 'yellow safety helmet' or 'how to use fire extinguisher'…" />
       <button id="goBtn">Go</button>
     </div>
 
@@ -97,14 +71,14 @@
         "rgba(255,255,255,0.95)";
     }
 
-    // Your model catalog (add more later)
+    // ✅ Catalog of your local GLB files
     const CATALOG = [
       { id: "hard_hat", label: "Hard hat", file: "models/hard_hat.glb", tags: ["helmet","ppe","construction","safety"] },
-      { id: "fire_extinguisher", label: "Fire extinguisher", file: "models/fire_extinguisher.glb", tags: ["fire","safety","equipment"] },
+      { id: "fire_extinguisher", label: "Fire extinguisher", file: "models/fire_extinguisher.glb", tags: ["fire","safety","emergency","equipment"] },
       { id: "hammer", label: "Hammer", file: "models/hammer.glb", tags: ["tool","construction","nails"] }
     ];
 
-    // --- Three.js viewer setup ---
+    // --- Three.js viewer ---
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0xf0f0f0);
 
@@ -130,12 +104,10 @@
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
-
       model.position.sub(center);
 
       const maxDim = Math.max(size.x, size.y, size.z);
-      const targetSize = 1.5;
-      const scale = targetSize / maxDim;
+      const scale = 1.5 / maxDim;
       model.scale.setScalar(scale);
     }
 
@@ -164,7 +136,13 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userText, catalog: CATALOG })
       });
-      if (!res.ok) throw new Error("AI request failed");
+
+      // if backend error, show message
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error("AI request failed: " + t);
+      }
+
       return await res.json(); // { chosenId, summary }
     }
 
@@ -179,7 +157,10 @@
       summaryEl.textContent = "Working…";
 
       try {
-        const { chosenId, summary } = await callAI(userText);
+        const result = await callAI(userText);
+
+        const chosenId = result?.chosenId;
+        const summary = result?.summary;
 
         const chosen = CATALOG.find(x => x.id === chosenId) || CATALOG[0];
 
@@ -187,18 +168,18 @@
         await loadModel(chosen.file);
 
         setStatus(`✅ Loaded: <code>${chosen.label}</code>`, "ok");
-        summaryEl.textContent = summary;
+        summaryEl.textContent = (summary && summary.trim()) ? summary : "No summary returned.";
       } catch (e) {
-        setStatus("❌ Something went wrong (AI/backend).", "err");
-        summaryEl.textContent = "Check backend setup (Day 3 step).";
+        setStatus("❌ AI/backend error (check deploy + env var)", "err");
+        summaryEl.textContent = String(e.message || e);
       }
     }
 
     goBtn.addEventListener("click", run);
     promptEl.addEventListener("keydown", (e) => { if (e.key === "Enter") run(); });
 
-    // Load default on start
-    loadModel("models/hard_hat.glb");
+    // default model on load
+    await loadModel("models/hard_hat.glb");
     summaryEl.textContent = "Type a description above and click Go.";
 
     function animate() {
